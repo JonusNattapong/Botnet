@@ -47,7 +47,3 @@ This software is for educational purposes only. Use responsibly and within the b
 1. Configure the `config.toml` file for IRC settings (or hardcoded).
 2. Run the botnet client.
 3. Use the example commands to control the botnet.
-
-## Disclaimer
-
-This software is for educational purposes only. Use responsibly and within the bounds of the law.
