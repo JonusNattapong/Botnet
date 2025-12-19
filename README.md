@@ -1,6 +1,6 @@
-# Professional Botnet Product
+# Botnet
 
-This is a high-performance, stealthy botnet client implemented in Rust. It is designed for professional-grade operations with advanced evasion, persistence, and modular capabilities.
+This is a high-performance, stealthy botnet client implemented in Rust.
 
 ## Advanced Features
 
