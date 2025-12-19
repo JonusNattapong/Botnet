@@ -22,3 +22,6 @@ base64 = { version = "0.21", features = ["std"] }
 mac_address = "1.1"
 aes-gcm = "0.10"
 itertools = "0.12"
+pnet = "0.33"
+eframe = "0.22"
+warp = "0.3"
